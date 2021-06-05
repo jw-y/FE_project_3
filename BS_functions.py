@@ -1,6 +1,7 @@
 import math
 from scipy.stats import norm
 import pandas as pd
+import numpy as np
 
 #today = date(2021, 5, 14)
 #expiration_date = date(2021, 6, 10)
@@ -47,3 +48,26 @@ def call_imvol(premium, S, K, T, r, opt='C'):
             return h
         if diff < 0: bot = h
         else: top = h
+
+def deCasteljau(i, j, u, D):
+    if D[i][j]:
+        return D[i][j]
+    p0 = deCasteljau(i-1, j, u, D)
+    p1 = deCasteljau(i-1, j+1, u, D)
+    D[i][j] = ((1-u)*p0[0]+u*p1[0], (1-u)*p0[1]+u*p1[1])
+    return D[i][j]
+
+def bezier_curve(P, num_points= 100):
+    points = []
+    n = len(P)-1
+    for u in np.linspace(0, 1, num_points):
+        D = [[None]*(n+1) for _ in range(n+1)]
+        for j in range(n+1):
+            D[0][j] = P[j]
+        points.append(deCasteljau(n, 0, u, D))
+
+
+
+
+
+
