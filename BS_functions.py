@@ -2,7 +2,8 @@ import math
 from scipy.stats import norm
 import pandas as pd
 import numpy as np
-from datetime import date
+from datetime import date, datetime
+import os
 
 today = date(2021, 6, 4)
 S = 4229.89 #S&P500 2021-06-04 close
@@ -143,13 +144,17 @@ def B_spline_surface(P, num_points=20):
     """
     cubic B-spline surface
     """
-    u_m, v_n = len(P), len(P[0])
+    #u_m, v_n = len(P), len(P[0])
+    u_m = len(P)
     u_knots = [0.0]*3+ np.linspace(0, 1, u_m-2).tolist() + [1.0]*3
-    v_knots = [0.0]*3+ np.linspace(0, 1, v_n-2).tolist() + [1.0]*3
+    #v_knots = [0.0]*3+ np.linspace(0, 1, v_n-2).tolist() + [1.0]*3
 
     grid = []
     for i in range(3, len(u_knots)-4):
         tmp_p = None
+        v_n = len(P[i])
+        v_knots = [0.0]*3+ np.linspace(0, 1, v_n-2).tolist() + [1.0]*3
+
         for j in range(3, len(v_knots)-4):
             tmp_u = []
             for u in np.linspace(u_knots[i], u_knots[i+1], num_points):
@@ -166,7 +171,7 @@ def B_spline_surface(P, num_points=20):
         grid += tmp_p    
     return grid
 
-def get_imvol_list(expir, df, moneyness=True, inc_maturity=False):
+def get_imvol_list(expir, df, moneyness=True, inc_tau=False, imvol=True):
     print("calculating calls expiring", expir)
     imvol_list = []
     for idx, row in df.iterrows():
@@ -184,23 +189,35 @@ def get_imvol_list(expir, df, moneyness=True, inc_maturity=False):
             tau = cal_tau(today, expir, PM_settle=False)
             maturity = float((expir-today).days -1)
 
-        x = call_imvol(premium, S, strike, tau, rf_rate)
+        if imvol:
+            x = call_imvol(premium, S, strike, tau, rf_rate)
+        else:
+            x = premium
         if x:
             if moneyness:
                 m = cal_moneyness(S, strike, tau, x, rf_rate)
-                if inc_maturity:
-                    imvol_list.append((m, maturity, x))
+                if inc_tau:
+                    imvol_list.append((m, tau, x))
                 else:
                     imvol_list.append((m, x))
             else:
-                if inc_maturity:
-                    imvol_list.append((strike, maturity, x))
+                if inc_tau:
+                    imvol_list.append((strike, tau, x))
                 else:
                     imvol_list.append((strike, x))
 
-
-
     return sorted(imvol_list)
+
+def get3Dpoints():
+    points = []
+    for filename in os.listdir('./data/calls'):
+        df = pd.read_hdf('./data/calls/'+filename)
+        expir = datetime.strptime(filename[6:12], "%y%m%d").date()
+        pp = get_imvol_list(expir=expir, df = df, inc_tau=True)
+        if len(pp) >= 4:
+            points.append(pp)
+    return points
+
 
 
 
