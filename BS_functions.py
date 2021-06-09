@@ -4,6 +4,9 @@ import pandas as pd
 import numpy as np
 from datetime import date, datetime
 import os
+import gurobipy as gp
+from gurobipy import GRB
+import matplotlib.pyplot as plt
 
 today = date(2021, 6, 4)
 S = 4229.89 #S&P500 2021-06-04 close
@@ -17,6 +20,12 @@ def BS_call(S, K, T, sigma, r):
     d1 = (math.log(S/K) + (r+ sigma**2/ 2)*T) / (sigma * math.sqrt(T))
     d2 = (math.log(S/K) + (r- sigma**2/ 2)*T) / (sigma * math.sqrt(T))
     return S*N(d1) - K* math.exp(-r*T)*N(d2)
+
+def BS_call_np(S, K, T, sigma, r):
+    N = norm.cdf
+    d1 = (np.log(S/K)) + (r+ sigma**2/2)*T / (sigma*np.sqrt(T))
+    d2 = (np.log(S/K)) + (r- sigma**2/2)*T / (sigma*np.sqrt(T))
+    return S*N(d1) - K*np.exp(-r*T)*N(d2)
 
 def BS_put(S, K, T, sigma, r):
     N = norm.cdf
@@ -63,6 +72,16 @@ def call_imvol(premium, S, K, T, r, opt='C'):
         else: top = h
         MAX-=1
     return None
+
+def cal_imvol_np(premium, S, K, T, r):
+    bot, top = 0, 3
+    h = (bot+top)/2
+    for _ in range(20):
+        diff = BS_call_np(S, K, T, h, r) - premium
+        bot = np.where(diff<0, h, bot)
+        top = np.where(diff>=0, h, top)
+        h = (bot+top)/2
+    return h
 
 def deCasteljau(i, j, u, D):
     if D[i][j]:
@@ -217,6 +236,97 @@ def get3Dpoints():
         if len(pp) >= 4:
             points.append(pp)
     return points
+
+def b_spline_base(P, x):
+    """P: control points"""
+    delta = np.mean(np.diff(P))
+    n_P = len(P)
+    t = [P[0]-delta*3, P[0]-delta*2, P[0]-delta*1]+\
+            np.linspace(P[0],P[-1], n_P-2).tolist()+\
+            [P[-1]+delta*1, P[-1]+delta*2, P[-1]+delta*3]
+    B = [[0.0]*(4) for _ in range(n_P+4)]
+
+    for i in range(len(t)):
+        if t[i]<=x and x<t[i+1]:
+            B[i][0]=1
+            break
+    for k in range(1, 4):
+        for i in range(len(t)-k-1):
+            B[i][k]= ((x-t[i])/(t[i+k]-t[i]))*B[i][k-1] + ((t[i+k+1]-x)/(t[i+k+1]-t[i+1]))*B[i+1][k-1]
+    return [B[i][3] for i in range(len(B))]
+
+def penalized_B_spline(P, lam=0.1):
+    _x, _y = list(zip(*P))
+    _y = np.array(_y)
+    bases = [b_spline_base(_x, i) for i in _x]
+    bases = np.array(bases)
+
+    m = gp.Model()
+    n_P = len(P)
+    #n_K = n_P+3+1
+    #max_x = max(_x)
+
+    x_c = np.linspace(_x[0], _x[-1], 1000)
+    c_bases = [b_spline_base(_x, i) for i in x_c]
+
+    alpha = m.addMVar(len(bases[0]), lb=-GRB.INFINITY, ub = GRB.INFINITY, name='alpha')
+
+    BB = bases.transpose()@bases
+    v = -2*bases.transpose() @_y
+    D = np.diff(np.eye(len(_y)), 2).transpose() #second derivative
+    dev = lam*bases.transpose()@D.transpose()@D@bases
+    obj = _y@_y + alpha@v+ alpha@BB@alpha + alpha@dev@alpha
+    m.setObjective(obj)
+
+    c_bases = np.array(c_bases)
+    #y_hat = c_bases@alpha
+    #call_hat = [BS_functions.BS_call(S, x_c[i], tau, y_hat[i], rf_free) for i in range(len(y_hat))]
+
+    D1 = np.diff(np.eye(len(x_c)), 1).transpose() #first derivative
+    D2 = np.diff(np.eye(len(x_c)), 2).transpose() #second derivative
+
+    #slope downward constraint
+    D1_C = D1@c_bases
+    m.addConstrs(D1_C[i]@alpha<=0 for i in range(D1.shape[0]))
+
+    #slope shoud be bigger than 1
+    D1_C_d = -D1@c_bases/(x_c[2]-x_c[1])
+    m.addConstrs(D1_C_d[i]@alpha-1<=0 for i in range(D1.shape[0]))
+
+    #convex constraint
+    D2_C = -D2@c_bases
+    m.addConstrs(D2_C[i]@alpha<=0 for i in range(D2.shape[0]))
+
+    m.optimize()
+
+    return m
+
+
+def gen_b_spline_curve():
+    tau = cal_tau(today, expiration_date=date(2021, 6, 11))
+    df = pd.read_hdf('./data/calls/call_s210611_d210606.h5')
+    points = get_imvol_list(expir=date(2021, 6, 11), df=df, moneyness=False, imvol=False)
+    points = points[1:]
+    _x, _y = list(zip(*points))
+    model = penalized_B_spline(points)
+    alpha_hat = [v.x for v in model.getVars()]
+    bases = [b_spline_base(_x, i) for i in _x]
+
+    xx, yy = np.linspace(_x[0], _x[-1], 1000), []
+    for x in xx:
+        yy.append(b_spline_base(_x, x)@np.array(alpha_hat))
+
+    plt.plot(xx, yy)
+    plt.scatter(_x, _y)
+    plt.show()
+    
+    y_imvol = cal_imvol_np(yy, S, xx, tau, rf_rate)
+    plt.plot(xx, y_imvol)
+    plt.show()
+
+
+if __name__=="__main__":
+
 
 
 
