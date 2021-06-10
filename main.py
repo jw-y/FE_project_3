@@ -75,7 +75,10 @@ def call_imvol(premium, S, K, T, r, opt='C'):
     return None
 
 def cal_imvol_np(premium, S, K, T, r):
-    bot, top = 0, 3
+    if isinstance(premium, np.ndarray):
+        bot, top = np.zeros(premium.shape[0]), 3*np.ones(premium.shape[0])
+    else:
+        bot, top = 0, 3
     h = (bot+top)/2
     for _ in range(40):
         diff = BS_call_np(S, K, T, h, r) - premium
@@ -336,6 +339,7 @@ def gen_b_spline_curve():
     plt.show()
     
     imvol_y = cal_imvol_np(_y, S, _x, tau, rf_rate)
+    yy = np.array(yy)
     line_y_imvol = cal_imvol_np(yy, S, xx, tau, rf_rate)
     plt.plot(xx, line_y_imvol)
     plt.scatter(_x, imvol_y, marker='.', c='k')
@@ -404,11 +408,10 @@ def gen_b_spline_surface():
 
     BB = bases_3D.transpose()@bases_3D
     v = -2*bases_3D.transpose()@_zz
-    lam = 0.001
-#dev = lam*bases_3D.transpose@
+    #lam = 0.001
+    #dev = lam*bases_3D.transpose@
     obj = _zz@_zz + alpha@v + alpha@BB@alpha
     m.setObjective(obj)
-#m.params.NonConvex = 2
 
     c_bases_3D = np.array(c_bases_3D)
 
@@ -471,9 +474,6 @@ def gen_b_spline_surface():
     plt.title('SPX call expiring 21-06-11 - 21-06-14')
     plt.savefig("spxcall210611_210611_surface_imvol.png")
     plt.show()
-
-    
-
 
 if __name__=="__main__":
     gen_b_spline_curve()
