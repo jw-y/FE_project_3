@@ -7,6 +7,7 @@ import os
 import gurobipy as gp
 from gurobipy import GRB
 import matplotlib.pyplot as plt
+from matplotlib import cm
 
 today = date(2021, 6, 4)
 S = 4229.89 #S&P500 2021-06-04 close
@@ -76,7 +77,7 @@ def call_imvol(premium, S, K, T, r, opt='C'):
 def cal_imvol_np(premium, S, K, T, r):
     bot, top = 0, 3
     h = (bot+top)/2
-    for _ in range(20):
+    for _ in range(40):
         diff = BS_call_np(S, K, T, h, r) - premium
         bot = np.where(diff<0, h, bot)
         top = np.where(diff>=0, h, top)
@@ -201,12 +202,16 @@ def get_imvol_list(expir, df, moneyness=True, inc_tau=False, imvol=True):
         if lastTradeDate.year!=2021 or lastTradeDate.month!=6 or lastTradeDate.day!=4:
             continue
 
+        tau = cal_tau(today, expir)
+        maturity = float((expir-today).days)
+        '''
         if contractSym[3]=='W':
             tau = cal_tau(today, expir)
             maturity = float((expir-today).days)
         else:
             tau = cal_tau(today, expir, PM_settle=False)
             maturity = float((expir-today).days -1)
+        '''
 
         if imvol:
             x = call_imvol(premium, S, strike, tau, rf_rate)
@@ -229,10 +234,10 @@ def get_imvol_list(expir, df, moneyness=True, inc_tau=False, imvol=True):
 
 def get3Dpoints():
     points = []
-    for filename in os.listdir('./data/calls'):
+    for filename in sorted(os.listdir('./data/calls')):
         df = pd.read_hdf('./data/calls/'+filename)
         expir = datetime.strptime(filename[6:12], "%y%m%d").date()
-        pp = get_imvol_list(expir=expir, df = df, inc_tau=True)
+        pp = get_imvol_list(expir=expir, df = df, moneyness=False, inc_tau=True, imvol=False)
         if len(pp) >= 4:
             points.append(pp)
     return points
@@ -255,7 +260,7 @@ def b_spline_base(P, x):
             B[i][k]= ((x-t[i])/(t[i+k]-t[i]))*B[i][k-1] + ((t[i+k+1]-x)/(t[i+k+1]-t[i+1]))*B[i+1][k-1]
     return [B[i][3] for i in range(len(B))]
 
-def penalized_B_spline(P, lam=0.1):
+def penalized_B_spline(P, tau,lam=0.1):
     _x, _y = list(zip(*P))
     _y = np.array(_y)
     bases = [b_spline_base(_x, i) for i in _x]
@@ -289,13 +294,16 @@ def penalized_B_spline(P, lam=0.1):
     D1_C = D1@c_bases
     m.addConstrs(D1_C[i]@alpha<=0 for i in range(D1.shape[0]))
 
-    #slope shoud be bigger than 1
-    D1_C_d = -D1@c_bases/(x_c[2]-x_c[1])
-    m.addConstrs(D1_C_d[i]@alpha-1<=0 for i in range(D1.shape[0]))
+    #slope shoud be bigger than e^(-rt)
+    D1_C_d = -D1@c_bases/(x_c[1]-x_c[0])
+    m.addConstrs(D1_C_d[i]@alpha-math.exp(-rf_rate*tau)<=0 for i in range(D1.shape[0]))
 
     #convex constraint
     D2_C = -D2@c_bases
     m.addConstrs(D2_C[i]@alpha<=0 for i in range(D2.shape[0]))
+
+    #bigger than 0
+    m.addConstr(c_bases[-1]@alpha>=0)
 
     m.optimize()
 
@@ -303,12 +311,14 @@ def penalized_B_spline(P, lam=0.1):
 
 
 def gen_b_spline_curve():
-    tau = cal_tau(today, expiration_date=date(2021, 6, 11))
-    df = pd.read_hdf('./data/calls/call_s210611_d210606.h5')
-    points = get_imvol_list(expir=date(2021, 6, 11), df=df, moneyness=False, imvol=False)
-    points = points[1:]
+    #expri_date = date(2021, 6, 11)
+    expri_date = date(2021, 6, 7)
+    tau = cal_tau(today, expiration_date=expri_date)
+    df = pd.read_hdf('./data/calls/call_s'+expri_date.strftime('%y%m%d')+'_d210606.h5')
+    points = get_imvol_list(expir=expri_date, df=df, moneyness=False, imvol=False)
+    #points = points[1:]
     _x, _y = list(zip(*points))
-    model = penalized_B_spline(points)
+    model = penalized_B_spline(points, tau)
     alpha_hat = [v.x for v in model.getVars()]
     bases = [b_spline_base(_x, i) for i in _x]
 
@@ -316,16 +326,158 @@ def gen_b_spline_curve():
     for x in xx:
         yy.append(b_spline_base(_x, x)@np.array(alpha_hat))
 
+    _x, _y = np.array(_x), np.array(_y)
     plt.plot(xx, yy)
-    plt.scatter(_x, _y)
+    plt.scatter(_x, _y, marker='.', c='k')
+    plt.xlabel("Strike")
+    plt.ylabel("Premium")
+    plt.title('SPX call expiring 21-06-11')
+    plt.savefig("spxcall210611_curve.png")
     plt.show()
     
-    y_imvol = cal_imvol_np(yy, S, xx, tau, rf_rate)
-    plt.plot(xx, y_imvol)
+    imvol_y = cal_imvol_np(_y, S, _x, tau, rf_rate)
+    line_y_imvol = cal_imvol_np(yy, S, xx, tau, rf_rate)
+    plt.plot(xx, line_y_imvol)
+    plt.scatter(_x, imvol_y, marker='.', c='k')
+    plt.xlabel("Strike")
+    plt.ylabel("Implied Volatility")
+    plt.title('SPX call expiring 21-06-11')
+    plt.savefig("spxcall210611_curve_imvol.png")
     plt.show()
+
+def gen_b_spline_surface():
+    points3D= get3Dpoints()
+    _x, _y, _z = [], [], []
+    for p in points3D:
+        t_x, t_y, t_z = list(map(list, zip(*p)))
+        _x.append(t_x)
+        _y.append(t_y)
+        _z.append(t_z)
+    tmp_x = []
+    for i in _x:
+        tmp_x.extend(i)
+
+    tmp_y = []
+    for i in _y:
+        tmp_y.extend(i)
+
+    mesh_tau = sorted(list(set(tmp_y)))[:4]
+#mesh_strike = sorted(list(set(tmp_x)))[7:-9]
+    mesh_strike = sorted(list(set(tmp_x)))[80:-77]
+
+    mask = [[False]*len(mesh_strike) for _ in range(len(mesh_tau))]
+    for i, _t in enumerate(mesh_tau):
+        for j, _s in enumerate(mesh_strike):
+            if _s in _x[i]:
+                mask[i][j] = True
+
+    bases_st = [b_spline_base(mesh_strike, i) for i in mesh_strike]
+    bases_tau = [b_spline_base(mesh_tau, i) for i in mesh_tau]
+
+    bases_3D = []
+    _xx,_yy,_zz = [], [], []
+    for i, _t in enumerate(mesh_tau):
+        for j, _s in enumerate(mesh_strike):
+            if _s in _x[i]:
+                bases_3D.append(np.kron(bases_st[j], bases_tau[i]))
+                idx = _x[i].index(_s)
+                _zz.append(_z[i][idx])
+                _xx.append(_x[i][idx])
+                _yy.append(_y[i][idx])
+    bases_3D = np.array(bases_3D)
+    _xx, _yy, _zz = np.array(_xx), np.array(_yy), np.array(_zz)
+
+    c_x = np.linspace(mesh_strike[0], mesh_strike[-1], 100)
+    c_y = np.linspace(mesh_tau[0], mesh_tau[-1], 10)
+
+    c_bases_st = [b_spline_base(mesh_strike, i) for i in c_x]
+    c_bases_tau = [b_spline_base(mesh_tau, i) for i in c_y]
+
+    c_bases_3D = []
+    for i in range(len(c_y)):
+        for j in range(len(c_x)):
+            c_bases_3D.append(np.kron(c_bases_st[j], c_bases_tau[i]))
+    c_bases_3D = np.array(c_bases_3D)
+
+    m = gp.Model()
+    alpha = m.addMVar(bases_3D[0].shape[0], lb=-GRB.INFINITY, ub=GRB.INFINITY, name='alpha')
+
+    BB = bases_3D.transpose()@bases_3D
+    v = -2*bases_3D.transpose()@_zz
+    lam = 0.001
+#dev = lam*bases_3D.transpose@
+    obj = _zz@_zz + alpha@v + alpha@BB@alpha
+    m.setObjective(obj)
+#m.params.NonConvex = 2
+
+    c_bases_3D = np.array(c_bases_3D)
+
+    D1 = np.diff(np.eye(len(c_x)), 1).transpose()
+    D2 = np.diff(np.eye(len(c_x)), 2).transpose()
+
+    for i in range(len(c_y)):
+        cur_bases = c_bases_3D[(i)*len(c_x):(i+1)*len(c_x)]
+        
+        D1_C = D1@cur_bases
+        m.addConstrs(D1_C[j]@alpha<=0 for j in range(D1.shape[0]))
+        
+        D1_C_d = -D1@cur_bases/(c_x[1]-c_x[0])
+        m.addConstrs(D1_C_d[j]@alpha-math.exp(-rf_rate*c_y[i])<=0 for j in range(D1.shape[0]))
+        
+        D2_c = -D2@cur_bases
+        m.addConstrs(D2_c[j]@alpha<=0 for j in range(D2.shape[0]))
+        
+        m.addConstr(cur_bases[-1]@alpha>=0)
+
+    D1_y = np.diff(np.eye(len(c_y)), 1).transpose()
+    for i in range(len(c_x)):
+        cur_bases = c_bases_3D[i::len(c_x)]
+        D1_CY = D1_y@cur_bases
+        m.addConstrs(D1_CY@alpha>=0 for j in range(D1_y.shape[0]))
+
+    m.optimize()
+
+    alpha_hat = np.array([v.x for v in m.getVars()])
+    Z = (c_bases_3D@alpha_hat).reshape((len(c_y), len(c_x)))
+    X, Y = np.meshgrid(c_x, c_y)
+
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    surf = ax.plot_surface(X, Y, Z, cmap=cm.coolwarm, alpha=0.8,
+                           linewidth=0, antialiased=False)
+    ax.scatter(_xx, _yy, _zz, marker='.')
+    ax.set_xlabel("Strike")
+    ax.set_ylabel("Maturity")
+    ax.set_zlabel("Premium")
+    plt.title('SPX call expiring 21-06-11 - 21-06-14')
+    plt.savefig("spxcall210611_210611_surface.png")
+    plt.show()
+
+    imvol_Z = []
+    for i in range(len(c_y)):
+        imvol_Z.append(cal_imvol_np(Z[i], S, c_x,c_y[i], rf_rate))
+    imvol_Z = np.array(imvol_Z)
+        
+    imvol_zz = []
+    for i in range(len(_yy)):
+        imvol_zz.append(cal_imvol_np(_zz[i], S, _xx[i],_yy[i], rf_rate))      
+
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    surf = ax.plot_surface(X, Y, imvol_Z, cmap=cm.coolwarm, alpha=0.8,
+                           linewidth=0, antialiased=False)
+    ax.scatter(_xx, _yy, imvol_zz, marker='.')
+    ax.set_xlabel("Strike")
+    ax.set_ylabel("Maturity")
+    ax.set_zlabel("Implied Volatility")
+    plt.title('SPX call expiring 21-06-11 - 21-06-14')
+    plt.savefig("spxcall210611_210611_surface_imvol.png")
+    plt.show()
+
+    
 
 
 if __name__=="__main__":
+    gen_b_spline_curve()
+    gen_b_spline_surface()
 
 
 
