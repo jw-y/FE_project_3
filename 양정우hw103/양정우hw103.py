@@ -334,8 +334,8 @@ def gen_b_spline_curve():
     plt.scatter(_x, _y, marker='.', c='k')
     plt.xlabel("Strike")
     plt.ylabel("Premium")
-    plt.title('SPX call expiring 21-06-07')
-    plt.savefig("spxcall210607_curve.png")
+    plt.title('SPX call expiring 21-06-11')
+    plt.savefig("spxcall210611_curve.png")
     plt.show()
     
     imvol_y = cal_imvol_np(_y, S, _x, tau, rf_rate)
@@ -345,8 +345,8 @@ def gen_b_spline_curve():
     plt.scatter(_x, imvol_y, marker='.', c='k')
     plt.xlabel("Strike")
     plt.ylabel("Implied Volatility")
-    plt.title('SPX call expiring 21-06-07')
-    plt.savefig("spxcall210607_curve_imvol.png")
+    plt.title('SPX call expiring 21-06-11')
+    plt.savefig("spxcall210611_curve_imvol.png")
     plt.show()
 
 def gen_b_spline_surface():
