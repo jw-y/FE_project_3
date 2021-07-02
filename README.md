@@ -1,8 +1,6 @@
 # Financial Engineering Project 3
 
-Project 3 for *Financial Engineering for Data Scientists* course, Spring 2021, Seoul National University. It is implemented in Python.
-
-SPX call premiums are used.
+Project 3 for *Financial Engineering for Data Scientists* course, Spring 2021, Seoul National University. It is implemented in Python. SPX call premiums are used.
 
 ## How to Run 
 
@@ -13,3 +11,5 @@ The following graphs pop up:
 1. Penalized B-spline implied volatility curve
 1. B-spline call premium surface
 1. B-spline implied volatility surface
+
+Fore more details reference 양정우hw103.pdf
