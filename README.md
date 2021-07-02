@@ -1,7 +1,7 @@
 # Financial Engineering Project 3
 
 Project 3 for *Financial Engineering for Data Scientists* course, Spring 2021, Seoul National University.
- * Drawing implied volatility curve and implied volatility surface, implemented in Python
+ * Drawing **implied volatility curve** and **implied volatility surface**, implemented in Python
  * SPX call premiums are used
  * Need Gurobi library to run
 
